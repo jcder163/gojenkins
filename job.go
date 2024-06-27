@@ -516,6 +516,56 @@ func (j *Job) Invoke(ctx context.Context, files []string, skipIfRunning bool, pa
 	return false, errors.New(strconv.Itoa(resp.StatusCode))
 }
 
+func (j *Job) InvokeN(ctx context.Context, files []string, skipIfRunning bool, params map[string]string, cause string, securityToken string) (bool, error) {
+	isQueued, err := j.IsQueued(ctx)
+	if err != nil {
+		return false, err
+	}
+	if isQueued {
+		Error.Printf("%s is already running", j.GetName())
+		return false, nil
+	}
+	isRunning, err := j.IsRunning(ctx)
+	if err != nil {
+		return false, err
+	}
+	if isRunning && skipIfRunning {
+		return false, fmt.Errorf("Will not request new build because %s is already running", j.GetName())
+	}
+
+	base := "/build"
+
+	// If parameters are specified - url is /builWithParameters
+	if params != nil {
+		base = "/buildWithParameters"
+	} else {
+		params = make(map[string]string)
+	}
+
+	// If files are specified - url is /build
+	if files != nil {
+		base = "/build"
+	}
+	reqParams := map[string]string{}
+
+	if securityToken != "" {
+		reqParams["token"] = securityToken
+	}
+
+	data := url.Values{}
+	for k, v := range params {
+		data.Set(k, v)
+	}
+	resp, err := j.Jenkins.Requester.PostFiles(ctx, j.Base+base, bytes.NewBufferString(data.Encode()), nil, reqParams, files)
+	if err != nil {
+		return false, err
+	}
+	if resp.StatusCode == 200 || resp.StatusCode == 201 {
+		return true, nil
+	}
+	return false, errors.New(strconv.Itoa(resp.StatusCode))
+}
+
 func (j *Job) Poll(ctx context.Context) (int, error) {
 	response, err := j.Jenkins.Requester.GetJSON(ctx, j.Base, j.Raw, nil)
 	if err != nil {
